@@ -1,0 +1,72 @@
+SuperMimic code/data audit, 2026-10-22
+
+OFFICIAL RELEASE STATUS
+Paper: https://arxiv.org/pdf/2610.28480
+Project: https://supermimic.github.io/
+Browser demo: https://supermimic.github.io/demo/
+Demo terms: https://supermimic.github.io/demo/LICENSE.html
+
+The official project page links the paper, video, and browser demo, but no training repository or downloadable research checkpoint. Public GitHub searches located independent reproductions, not an author training release. This is an observed release limitation, not proof that no other repository can exist.
+
+The demo has trained policy/world-model material, but its explicit terms allow only personal noncommercial evaluation through the served browser demo. They restrict retention/extraction/reverse engineering and using demo materials or outputs to train/evaluate other systems. It is not an appropriate checkpoint source for this reproduction. No weights or motion assets were extracted or retained during this audit. Source/terms were read to establish availability and constraints; use original upstream G1 assets instead.
+
+MAINTAINED BASE FRAMEWORK / ROBOT
+https://github.com/mujocolab/mjlab
+https://github.com/mujocolab/mjlab/tree/main/src/mjlab/tasks/tracking
+https://mujocolab.github.io/mjlab/main/source/training/motion_imitation.html
+https://github.com/HybridRobotics/whole_body_tracking
+
+BeyondMimic's original HybridRobotics/whole_body_tracking README declares it retired and points to mjlab's motion-tracking task. mjlab directly includes G1 assets and MuJoCo Warp integration. Its converter convention matters: MuJoCo body order differs from IsaacLab/PhysX, so NPZ generated for another engine should not be reused blindly.
+
+SELECTED INDEPENDENT IMPLEMENTATION
+https://github.com/CuboiLeo/SuperMimic-Reproduced
+Audited immutable revision: d9be385b3eeb13a638fb33fb200d3bfd9be9839f
+Local pristine shallow checkout: work/upstream
+License: MIT (retained with the deliverable copy).
+Pinned mjlab dependency: 8bb2bc9e187797689ec82c78c35019afd2fd0376
+Dependency declaration: Python >=3.12,<3.13; Torch >=2.14 from CUDA 13.0 wheel index; MuJoCo and MuJoCo Warp ~=3.16; Warp >=1.15. No uv.lock shipped. Use actual environment lock/freeze from successful setup for reproducibility. PyPI mjlab 1.6.0 is not interchangeable with the pinned commit, despite identical version text.
+
+The source is substantive: learned world dynamics, learned termination head, analytic differentiable observation/reward/FK heads, replay buffer, BPTT actor, bootstrapped critic, multi-clip reset sampler, data conversion, benchmark, torchrun gradient averaging, and numerical tests. Candidate docs report actual single/multi-GPU experiments, but no public checkpoint or raw experiment log was present in the audited tree. Claimed success is not independently verified by this audit.
+
+Its README reports 0.904 on LAFAN1 only after adding 9D anchor-relative position/orientation observations, and reports roughly 0.56-0.59 with the stated paper proprioception-only observation. The documentation attributes much of the gap to yaw/xy drift over full 100-270 s LAFAN1 motions. Thus adopt it as an executable independent implementation, not an already-verified paper reproduction.
+
+Paper-observation switch: EnvCfg.anchor_obs defaults False. Leaving --env.anchor-obs absent uses 930-dimensional proprioceptive history (10 x 93) and a 680-dimensional motion target (10 x 68). Adding --env.anchor-obs appends 9 dimensions to the target, an explicit deviation. The 68D target contents are the independent implementer's choice because the paper is underspecified there: joint pose/velocity, projected gravity, body angular velocity, heading-frame linear velocity, root height.
+
+Other implementation choices needing disclosure: nominal state-error normalization and state increments are hand-selected; critic input includes root error; learned termination head is 64,64; residual dynamics uses explicit integration prior. The reported world-model NSE is therefore not directly comparable to the paper's numeric 0.007-0.011 even if numerically similar. Tests compare FK and analytic heads against MuJoCo/mjlab and exercise training, but some data/CUDA tests skip unless their prerequisites exist. Do not equate a skipped suite with validated training.
+
+The loop's distributed launcher assigns one visible GPU per rank before importing Torch/Warp and uses explicit mean gradient all-reduces. Each rank retains its own simulator/replay, learning rates scale by sqrt(world_size). Paper settings use 4096 environments/rank, world-model 10 batches of 2048 length-8 windows/update, policy 4096 length-32 imagined rollouts/update, UTD 0.4, Adam 2e-4. H200 memory should not force the reduced batch used by the independent author's 5090 run, but actual hardware smoke must verify.
+
+Alternative inspected: https://github.com/zita-ch/supermimic_vibed
+The author labels it unofficial and rapidly AI-generated. It uses IsaacLab 3 kitless/Newton/MuJoCo Warp, requires a Docker image plus URDF -> MJCF -> USD conversion, and documents bf16 instead of paper TF32, disabled self collisions, and extra relative orientation observation. It reports 0.829/0 failures on 40 LAFAN1 clips after 1.47 h on RTX PRO 6000. These are self-reported results with deviations. It is a heavier and less direct route than the selected mjlab implementation for this environment.
+
+PUBLIC DATA FOR FIRST REPRODUCTION
+https://huggingface.co/datasets/lvhaidong/LAFAN1_Retargeting_Dataset
+Pinned dataset revision: ce1572906efe6157840e8474d5a0d7aa87481e74
+Verified API metadata lists exactly 40 CSVs under g1/.
+Direct file pattern: https://huggingface.co/datasets/lvhaidong/LAFAN1_Retargeting_Dataset/resolve/ce1572906efe6157840e8474d5a0d7aa87481e74/g1/walk1_subject1.csv
+CSV input: 30 Hz, 36 columns = root xyz (m), root quaternion xyzw, 29 joint radians. Upstream selected source converts to 50 Hz, computes CPU MuJoCo FK and link velocities, and validates joint order against pinned mjlab G1 asset. All 40 clips sum to about 2.45 h, the paper's controlled Figure 4 data scale. Underlying LAFAN1 data is CC BY-NC-ND 4.0; preserve dataset attribution and source terms, not the independent code's MIT license, for the motion data.
+
+Full benchmark source: https://huggingface.co/datasets/bones-studio/seed
+Observed revision: 2f59b2077b9da34dd4e43618e705c7cb962c9a66
+HF API gated='auto'; page requires accepting license and sharing contact information. G1 archive g1.tar.gz is approximately 23.5 GB. Do not bypass gate via an unapproved mirror. Source has 142,220 motions, 120 Hz, cm and Euler degrees; selected converter handles that schema. Paper final filter: 129,514 clips, 264.56 h. Candidate's filter self-reports 129,943 clips, 263.75 h, so it does not reproduce the exact benchmark manifest. A full-paper result needs authorized dataset access AND an audited filtering/manifest reconciliation.
+
+EXECUTABLE PATH
+1. Retain pinned independent source and upstream licenses; install pinned mjlab stack in isolated env.
+2. Fetch only public LAFAN1 g1/*.csv at the pinned dataset revision.
+3. Convert with scripts/data/csv_to_npz_batch.py --input-dir <raw/g1> --output-dir data/npz/lafan1 --input-fps 30 --output-fps 50 --workers <cpu count>.
+4. Run numerical FK/heads/data tests and CUDA environment/training smoke. tests/test_env_smoke.py expects walk1_subject1, dance1_subject1, jumps1_subject1 in data/npz/lafan1.
+5. Start a small smoke via --data.clips walk1_subject1 --env.num-envs 128 --env.replay-capacity 200 --world-model.hidden 256 256 --policy.encoder-hidden 256 128 --policy.decoder-hidden 256 128 --wm-trainer.batch-size 256 --wm-trainer.batches-per-update 2 --policy-trainer.batch-size 128 --policy-trainer.horizon 8 --schedule.total-iterations 60 --schedule.warmup-iterations 20 --schedule.log-interval 20 --schedule.checkpoint-interval 60. The test suite implements this config programmatically; CLI flags should be verified via --help.
+6. Main LAFAN1 run should retain paper-sized networks/batches, H32, full 40 clips, anchor_obs=False, pinned seed/config, and actual training-clock logs. Evaluate checkpoints on all 40 clips, independently of training logs. Extra GPUs can run seeds/ablations or explicit distributed scaling; do not confuse additional GPUs with the paper's one-GPU time comparison.
+
+EVALUATION AUDIT AND DELIVERABLE PATCH
+Candidate docs/REPRODUCTION_PLAN.md:503 intended denominator 0.1*(frames-1), unchanged on early termination. Actual upstream benchmark.py divided by executed steps, so an early failure following a perfect short prefix could score 1.0. Paper's prose does not fully resolve denominator conventions; disclose both instead of silently assuming equivalence.
+
+Updated in outputs/reproduction:
+- src/supermimic/eval/metrics.py: standard-library-only return_scores helper reports full_clip_norm_return, executed_steps_norm_return, planned/executed transitions, completion. Rejects invalid horizons, keeps negative rewards, zero-step scores zero.
+- src/supermimic/eval/benchmark.py: retains legacy norm_return meaning as executed-step alias, adds explicit full-clip primary summary, both macro and length-weighted scores, completion, and definitions in JSON.
+- scripts/eval_benchmark.py: prints full-clip score first and explicitly labels conditional score/legacy alias.
+- tests/test_benchmark_metrics.py: standard-library unittest regression verifies early failure scores 0.2 full-clip vs 1.0 conditional, completed motion 1.0, preserves penalties, and rejects an extra horizon step.
+
+The source command lifecycle advances target frame after termination checks, so a successful N-frame clip naturally executes an extra final-target hold step before auto-reset. Benchmark scoring now masks rewards at exactly N-1 transitions and ignores failure only on that unscored bookkeeping step; simulator_steps remains visible. Queue mechanics still use natural auto-reset. Hardware validation of the benchmark queue remains for the parent's GPU smoke.
+
+Validation completed here: PYTHONPATH=src python -m unittest discover -s tests -p test_benchmark_metrics.py -v => 4 passed; python compileall for modified evaluator files passed. System Python had no pytest, so no package installation was attempted. No GPU runs were performed by this audit agent.

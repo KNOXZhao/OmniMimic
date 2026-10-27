@@ -1,0 +1,47 @@
+SUPERMIMIC PAPER AUDIT — 2026-10-22
+
+Primary references
+P: https://arxiv.org/pdf/2610.28480 (v1 submitted 2026-10-20; 19 pages)
+W: https://supermimic.github.io/ (project and browser demo; no training code link found)
+D: https://huggingface.co/datasets/bones-studio/seed (official dataset)
+This file records numerical specifications and implementation questions for reproduction; these are author-reported targets, not measurements from our environment.
+
+Reproduction targets (P sections 4, F)
+Main: G1-retargeted BONES-SEED 129514 clips, 264.56 hours after filtering; one H100 SXM5 80GB for 3 hours gives normalized return >0.90 and 25 failures; 2 H100 for 9.8 hours gives zero failures. Training length 320000 iterations. Checkpoint evaluation every 4000 iterations, excluded from reported training cost. Public SONIC checkpoint = 0.90 / 179 failures; v1.1 = 239 failures.
+Small controlled benchmark: LAFAN1, 40 clips / 2.45 hours; >0.82 evaluation normalized return in 1.2 H100-hours. PPO-Sim after 18 hours: 0.60 / 0.70 / 0.72 with 1 / 4 / 8 GPUs. Dataset scaling subsets: 1 / 7 / 40 / 264 hours.
+Hardware mismatch: our H200 timings cannot be represented as reproduced H100 wall clock or identical GPU-hour comparisons.
+
+Algorithm (P equations 1–3, Algorithm A.1)
+Repeat collection, world-model supervised fitting, actor + critic update. No separate expert pretraining. Replay is FIFO; old-policy transitions remain valid. Collection action = deterministic actor output + Gaussian std0.1 per component; log executed noisy action. During imagination, actor is deterministic except known observation sensor noise, with no action exploration noise.
+World model: deterministic learned dynamics conditioned on logged episode parameters; autoregressive k=8 fitting on logged executed actions. Predict next state, noise-free observation, reward, termination; losses = state squared error + observation squared error + reward squared error + termination BCE, except analytically computed heads have no supervised term. Which heads are analytic is unspecified.
+Actor: freeze model parameters, retain differentiability through state/action inputs. Rollout H=32 from replay states and associated context. Survival c0=1, c[t+1]=c[t]*(1-p_done[t+1]); objective sum_{t=0..H-1} gamma^t*c[t]*r[t+1] + gamma^H*c[H]*V(sH,gH,context).
+Critic: V(state,goal,context); backward lambda-return R[t]=r[t+1]+gamma*(1-p_done[t+1])*((1-lambda)*V[t+1]+lambda*R[t+1]), RH=VH. Targets fixed during critic fitting, no target EMA network. Critic trained only on imagination.
+Reset sampler: 1-second motion bins; 50% uniform, 40% softmax(-25*bin_discounted_return/max_possible_return), 10% proportional to historical softmax weights. Return-estimate update rate unspecified.
+
+Exact numerical defaults (P Tables A.1–A.5)
+Control dt=0.02s (50Hz); physics dt=0.005s, decimation4; MuJoCo Warp; TF32 neural computation.
+World model MLP hidden2048,2048,2048. Adam, lr0.0002 (2 GPUs sqrt(2)*0.0002); global norm clip1.0. Each update comprises 10 batches of 2048 windows, k8.
+Motion goal encoder hidden2048,1024,512,256; 10 future reference frames; latent dimension32, tanh bound.
+Actor decoder hidden2048,1024,512,256; latent + last10 proprioceptive observations. Adam betas(0.9,0.95), lr same as WM; global norm clip1.0 followed by elementwise clip0.1. Batch4096 imagined trajectories, H32, gamma0.99.
+Critic hidden256,128; Adam same lr; clip1.0; lambda0.95; 5 epochs with 4 shuffled minibatches each.
+4096 simulator environments/GPU, replay1000 steps/environment. Update-to-data ratio0.4; actor updates per WM update1. Cosine lr to0.03*initial over250000 iterations, constant thereafter; total320000. Multi-GPU averaged gradients. Beyond two GPUs LR rule unspecified.
+Per-step proprioception93 dimensions: joint position relative default29, joint velocity29, base angular velocity3, projected gravity3, previous action29. History10 gives930 actor proprioception dims. Independent uniform noise respectively ±0.01rad, ±0.5rad/s, ±0.2rad/s, ±0.05, none.
+Joint setpoint = action_scale*action+default_pose. Gains/scales/default pose inherited from BeyondMimic but numerical values not in paper.
+Episode context: friction U[0.3,1.2]; joint calibration offset U[-0.01,0.01]rad; torso CoM xyz offsets ±0.025/0.05/0.05m. No random root-velocity pushes.
+
+Rewards and termination (P Tables A.2–A.3)
+Every reward term multiplied by0.02s.
+Tracking exponential rewards exp(-mean_body_squared_error/sigma^2): body positions sigma0.3 weight1, orientations logSO3 sigma0.4 weight1, linear velocities sigma1 weight1, angular velocities sigma3.14 weight1. Root position sigma0.3 weight0.5 and root orientation sigma0.4 weight0.5 use root errors. Action delta squared norm weight-0.1. Joint bound overflow sum weight-2. No self-collision penalty.
+Termination: |root_height-reference_root_height|>0.25m OR abs(gravity_z_in_reference_pelvis-gravity_z_in_robot_pelvis)>0.8. No end-effector termination. Note relative tilt metric; upright-only tilt tests would break rolling/flipping clips.
+Evaluation: each motion once from FIRST frame, friction1.0, no domain randomization, no observation noise, deterministic physics. Each policy retains own gains/action scaling/observation assembly. Failure iff above training termination fires. Return = undiscounted episode sum divided by full-motion maximum; premature termination lowers numerator without shortening denominator. Max positive per-step reward5*0.02=0.1. Confirm handling of initial/final frames and reference length in implementation. These are training-set coverage results, not held-out generalization.
+
+Dataset and exact filter issues (P Appendix E; D)
+Raw142220 -> name-filter129667 -> feasibility-filter129514. Remove names involving e.g. stair, ladder, box, chair, sit, climb, jump off50cm, look over fence. Complete keyword list absent; source says SONIC list plus additions.
+Run MuJoCo FK: min body-link height >0.20m for>=0.6s; min height<-0.12m any time or <-0.08m over80% clip; floating feet exact geom-plane distance>0.02m for>=0.5s with upright/standing-height/nearly-stationary gate. Gate thresholds absent. Total feasibility removals153. Thresholds at50Hz.
+Official data is gated: user account must accept license/share HF information. Do not accept on user's behalf absent authorization. Existing granted access can be used. G1 archive g1.tar.gz -> g1/csv/{date}/{motion_name}.csv; metadata seed_metadata_v003.parquet/csv. Avoid downloading SOMA variants unnecessarily.
+
+Missing information that prevents claiming exact training reproduction
+No linked training implementation found on paper/project. Need determine full dynamics state coordinates and frame conventions; full-state vs delta prediction; rotational representation/integration; state/observation/reward normalizers and loss weights; analytic heads vs learned heads; termination-head architecture; MLP activations/initialization; tracked bodies; goal features and temporal spacing; actuator gains/limits/scales; replay terminal masks/window boundaries; replay warmup; world-model update/data accounting; reset noise and return EMA; compiler/runtime versions; exact retained motion manifest; random seeds. Paper says several seeds stable but gives no variance or seed list. Treat chosen substitutes as explicit deviations.
+
+Recommended execution order (audit inference)
+First recover official browser-demo ONNX/config/XML assets if available, establishing a native MuJoCo checkpoint evaluation. Then build/run the LAFAN1 controlled recipe with paper-sized networks, k8/H32 and exact rewards. Use extra GPUs for independent seeds/ablation/evaluation rather than assuming eight-GPU scaling reproduces the published single-GPU efficiency. Run filtered BONES only when access, data manifest, and preprocessing are settled. Preserve versions, checkpoint hashes, raw metrics and wall-clock/GPU counts. A checkpoint rollout reproduction must be labeled separately from training-from-scratch reproduction.

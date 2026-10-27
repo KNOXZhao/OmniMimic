@@ -1,0 +1,55 @@
+{
+  "torch": "2.10.0+cu130",
+  "cuda_runtime": "13.0",
+  "available": true,
+  "devices": [
+    {
+      "index": 0,
+      "name": "NVIDIA H200",
+      "total_memory": 150110011392,
+      "finite": true
+    },
+    {
+      "index": 1,
+      "name": "NVIDIA H200",
+      "total_memory": 150110011392,
+      "finite": true
+    },
+    {
+      "index": 2,
+      "name": "NVIDIA H200",
+      "total_memory": 150110011392,
+      "finite": true
+    },
+    {
+      "index": 3,
+      "name": "NVIDIA H200",
+      "total_memory": 150110011392,
+      "finite": true
+    },
+    {
+      "index": 4,
+      "name": "NVIDIA H200",
+      "total_memory": 150110011392,
+      "finite": true
+    },
+    {
+      "index": 5,
+      "name": "NVIDIA H200",
+      "total_memory": 150110011392,
+      "finite": true
+    },
+    {
+      "index": 6,
+      "name": "NVIDIA H200",
+      "total_memory": 150110011392,
+      "finite": true
+    },
+    {
+      "index": 7,
+      "name": "NVIDIA H200",
+      "total_memory": 150110011392,
+      "finite": true
+    }
+  ]
+}
